@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net catch-all block
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions for validating security tokens and inputs
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Zero-Trust ABAC validation helper for Citizen History document insertions
+    function isValidHistoryItem(data) {
+      return data.keys().hasAll(['title', 'category', 'simplifiedEnglish', 'createdAt', 'userEmail'])
+        && data.keys().size() <= 10
+        && data.title is string && data.title.size() <= 500
+        && data.category is string && data.category.size() <= 150
+        && data.simplifiedEnglish is string && data.simplifiedEnglish.size() <= 100000
+        && data.userEmail is string && data.userEmail == request.auth.token.email;
+    }
+
+    // Citizen history entries collection configuration
+    match /citizen_history/{historyId} {
+      allow create: if isSignedIn() 
+        && isValidId(historyId)
+        && isValidHistoryItem(request.resource.data)
+        && request.resource.data.createdAt == request.time;
+      
+      allow read, delete: if isSignedIn()
+        && resource.data.userEmail == request.auth.token.email;
+        
+      allow update: if false; // Documents are immutable for auditing and tamper protection
+    }
+  }
+}

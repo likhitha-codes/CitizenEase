@@ -1,0 +1,8 @@
+{
+  "name": "DocuEase",
+  "description": "Simplifying, translating, and narrating government documents with accessibility support for every citizen.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

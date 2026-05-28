@@ -1,0 +1,55 @@
+{
+  "entities": {
+    "CitizenHistoryItem": {
+      "title": "CitizenHistoryItem",
+      "description": "Historical simplified document snapshot saved in Firestore. Syncs with citizen credentials.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Dynamic citizen-friendly synthesized document title."
+        },
+        "originalText": {
+          "type": "string",
+          "description": "Official government legalese input text."
+        },
+        "category": {
+          "type": "string",
+          "description": "Detected category, such as Welfare Notice, Judicial Policy."
+        },
+        "relevancePassed": {
+          "type": "boolean",
+          "description": "Whether the document succeeded NIC relevancy benchmarks."
+        },
+        "simplifiedEnglish": {
+          "type": "string",
+          "description": "Simplified plain English text of the document."
+        },
+        "teluguTranslation": {
+          "type": "string",
+          "description": "Simplified plain Telugu translation."
+        },
+        "hindiTranslation": {
+          "type": "string",
+          "description": "Simplified plain Hindi translation."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Precision server timestamp marking entry insertion."
+        },
+        "userEmail": {
+          "type": "string",
+          "description": "Authenticated email of the citizen."
+        }
+      },
+      "required": ["title", "category", "simplifiedEnglish", "createdAt", "userEmail"]
+    }
+  },
+  "firestore": {
+    "/citizen_history/{historyId}": {
+      "schema": "CitizenHistoryItem",
+      "description": "Collection of official simplified document reports securely saved by citizens to their Firebase."
+    }
+  }
+}
