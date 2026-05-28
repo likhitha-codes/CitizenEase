@@ -20,6 +20,8 @@ import Register from './pages/Register';
 
 import { User, Toast, HistoryItem } from './types';
 import { splitTextIntoSentences } from './utils';
+import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
+import { db } from "./firebase";
 
 export default function App() {
   const [page, setPage] = useState<string>('home');
@@ -111,31 +113,138 @@ export default function App() {
   }, [user, token]);
 
   const fetchUserHistory = async () => {
-    try {
-      const res = await fetch('/api/history', {
-        headers: {
-          Authorization: `Bearer ${token}`
+    if (!user) return;
+    const items: HistoryItem[] = [];
+    const seenIds = new Set<string>();
+
+    const processSnapshot = (querySnapshot: any) => {
+      querySnapshot.forEach((docSnap: any) => {
+        if (seenIds.has(docSnap.id)) return;
+        seenIds.add(docSnap.id);
+
+        const data = docSnap.data();
+        let timestampStr = new Date().toISOString();
+        if (data.createdAt) {
+          if (data.createdAt.seconds) {
+            timestampStr = new Date(data.createdAt.seconds * 1000).toISOString();
+          } else if (typeof data.createdAt === 'string') {
+            timestampStr = data.createdAt;
+          } else if (data.createdAt.toDate) {
+            timestampStr = data.createdAt.toDate().toISOString();
+          }
         }
+        items.push({
+          id: docSnap.id,
+          title: data.title || 'Document Snapshot',
+          category: data.category || 'General',
+          timestamp: timestampStr,
+          languageSelected: ['English', 'Telugu', 'Hindi'],
+          result: {
+            id: docSnap.id,
+            title: data.title || 'Document Snapshot',
+            originalText: data.originalText || '',
+            category: data.category || 'General',
+            relevancePassed: data.relevancePassed ?? true,
+            relevanceExplanation: data.relevanceExplanation || '',
+            simplifiedEnglish: data.simplifiedEnglish || '',
+            teluguTranslation: data.teluguTranslation || '',
+            hindiTranslation: data.hindiTranslation || '',
+            timestamp: timestampStr
+          }
+        });
       });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setHistory(data);
-    } catch {
-      console.warn("Failed syncing user history registers.");
+    };
+
+    // 1. Try querying by Uid (Primary & robust)
+    try {
+      const qByUid = query(
+        collection(db, 'citizen_history'),
+        where('userId', '==', user.id)
+      );
+      const snapByUid = await getDocs(qByUid);
+      processSnapshot(snapByUid);
+    } catch (uidErr) {
+      console.warn("UID-based history query skipped or limited:", uidErr);
     }
+
+    // 2. Try querying by Email (Backward compatible)
+    if (user.email) {
+      const cleanEmailLower = user.email.toLowerCase().trim();
+      
+      // Query with the exact email casing in user profile
+      try {
+        const qByEmail = query(
+          collection(db, 'citizen_history'),
+          where('userEmail', '==', user.email)
+        );
+        const snapByEmail = await getDocs(qByEmail);
+        processSnapshot(snapByEmail);
+      } catch (emailErr) {
+        console.warn("Email-based history query skipped or limited:", emailErr);
+      }
+
+      // Query with lowercased email if it is different
+      if (cleanEmailLower !== user.email) {
+        try {
+          const qByEmailLower = query(
+            collection(db, 'citizen_history'),
+            where('userEmail', '==', cleanEmailLower)
+          );
+          const snapByEmailLower = await getDocs(qByEmailLower);
+          processSnapshot(snapByEmailLower);
+        } catch (emailLowerErr) {
+          console.warn("Lower-email history query skipped or limited:", emailLowerErr);
+        }
+      }
+    }
+
+    // Sort history items chronologically (latest first)
+    items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    setHistory(items);
   };
 
   // Fetch shared document snapshots
   const handleLoadSharedResult = async (id: string) => {
     addToast('info', 'Importing shared simplified document snapshot from portal...');
     try {
+      // 1. Try Firestore snapshot read (perfectly robust, cloud persistent, works everywhere)
+      const docRef = doc(db, 'shares', id);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const sharedHomeResult = {
+          id: id,
+          title: data.title || 'Shared Document',
+          originalText: data.originalText || '',
+          category: data.category || 'General',
+          relevancePassed: true,
+          relevanceExplanation: 'Imported via shared portal link',
+          simplifiedEnglish: data.simplifiedEnglish || '',
+          teluguTranslation: data.teluguTranslation || '',
+          hindiTranslation: data.hindiTranslation || '',
+          timestamp: data.createdAt || new Date().toISOString()
+        };
+
+        setPage('home');
+        setTimeout(() => {
+          const homeComp = document.getElementById('upload-panel-anchor');
+          if (homeComp) {
+            const event = new CustomEvent('load_shared_document', { detail: sharedHomeResult });
+            window.dispatchEvent(event);
+            addToast('success', `Loaded shared snapshot: "${data.title}"`);
+          }
+        }, 300);
+        return;
+      }
+
+      // 2. Fallback to older API endpoint if Firestore doesn't resolve it
       const res = await fetch(`/api/share/${id}`);
       if (!res.ok) {
         throw new Error('Shared document not found');
       }
       const data = await res.json();
       
-      // Inject the shared result directly into Home Page state triggers
       const sharedHomeResult = {
         id: data.id,
         title: data.title,
@@ -149,12 +258,10 @@ export default function App() {
         timestamp: data.createdAt
       };
 
-      // Set page to home and wait short duration for Home page to load, then trigger loading
       setPage('home');
       setTimeout(() => {
         const homeComp = document.getElementById('upload-panel-anchor');
         if (homeComp) {
-          // Dispatch a custom event to notify Home component to set shared result
           const event = new CustomEvent('load_shared_document', { detail: sharedHomeResult });
           window.dispatchEvent(event);
           addToast('success', `Loaded shared snapshot: "${data.title}"`);
@@ -162,6 +269,7 @@ export default function App() {
       }, 300);
 
     } catch (err: any) {
+      console.error(err);
       addToast('error', 'The shared result link is invalid or expired.');
     }
   };

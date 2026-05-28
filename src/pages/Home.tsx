@@ -353,7 +353,8 @@ export default function Home({
             teluguTranslation: fullDocResult.teluguTranslation,
             hindiTranslation: fullDocResult.hindiTranslation,
             createdAt: serverTimestamp(),
-            userEmail: user.email
+            userEmail: user.email,
+            userId: user.id
           });
           onAddToast('info', 'Secure Firebase Cloud Copy preserved successfully.');
         } catch (error: any) {
@@ -440,26 +441,21 @@ export default function Home({
   const handleShareResult = async () => {
     if (!result) return;
     try {
-      const res = await fetch('/api/share', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: result.title,
-          category: result.category,
-          originalText: result.originalText,
-          simplifiedEnglish: result.simplifiedEnglish,
-          teluguTranslation: result.teluguTranslation,
-          hindiTranslation: result.hindiTranslation,
-        }),
+      const shareId = `share_${Math.random().toString(36).substring(2, 9)}`;
+      
+      // Save directly to Firestore 'shares' collection
+      await setDoc(doc(db, 'shares', shareId), {
+        title: result.title,
+        category: result.category,
+        originalText: result.originalText,
+        simplifiedEnglish: result.simplifiedEnglish,
+        teluguTranslation: result.teluguTranslation,
+        hindiTranslation: result.hindiTranslation,
+        createdAt: new Date().toISOString()
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
       // Create physical absolute link using APP_URL or simple state pathing
-      const shareUrl = `${window.location.protocol}//${window.location.host}?shareId=${data.shareId}`;
+      const shareUrl = `${window.location.protocol}//${window.location.host}?shareId=${shareId}`;
       navigator.clipboard.writeText(shareUrl);
       
       onAddToast('success', 'Shareable snapshot compiled! Absolute URL copied to clipboard.');
@@ -469,7 +465,41 @@ export default function Home({
         `Your shared snapshot contains the official simplified translations. You can send this link to other citizens directly: ${shareUrl}`,
       );
     } catch (err: any) {
-      onAddToast('error', 'Failed to generate share link.');
+      console.error(err);
+      onAddToast('error', 'Failed to generate share link via Firestore, trying backup.');
+      
+      // Fallback post request
+      try {
+        const res = await fetch('/api/share', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: result.title,
+            category: result.category,
+            originalText: result.originalText,
+            simplifiedEnglish: result.simplifiedEnglish,
+            teluguTranslation: result.teluguTranslation,
+            hindiTranslation: result.hindiTranslation,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        const shareUrl = `${window.location.protocol}//${window.location.host}?shareId=${data.shareId}`;
+        navigator.clipboard.writeText(shareUrl);
+        
+        onAddToast('success', 'Backup share link generated! Absolute URL copied to clipboard.');
+        onOpenConfirmModal(
+          () => {},
+          'Share Saved Successfully',
+          `Your shared snapshot contains the official simplified translations. You can send this link to other citizens directly: ${shareUrl}`,
+        );
+      } catch (backupErr) {
+        onAddToast('error', 'Failed to generate share link.');
+      }
     }
   };
 

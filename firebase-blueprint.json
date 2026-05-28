@@ -41,6 +41,10 @@
         "userEmail": {
           "type": "string",
           "description": "Authenticated email of the citizen."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Unique identifier (UID) of the citizen."
         }
       },
       "required": ["title", "category", "simplifiedEnglish", "createdAt", "userEmail"]

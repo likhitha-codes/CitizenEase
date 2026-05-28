@@ -6,8 +6,9 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Lock, Mail, Landmark, ShieldCheck, HelpCircle, Phone } from 'lucide-react';
 import { User } from '../types';
-import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
-import { auth } from "../firebase";
+import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { collection, query, where, getDocs, doc, getDoc, setDoc } from "firebase/firestore";
+import { auth, db } from "../firebase";
 
 interface LoginProps {
   setPage: (page: string) => void;
@@ -16,39 +17,82 @@ interface LoginProps {
 }
 
 export default function Login({ setPage, onLoginSuccess, onAddToast }: LoginProps) {
-  const [email, setEmail] = useState('');
+  const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      onAddToast('error', 'Please fill out all registration and login fields.');
+    if (!identifier || !password) {
+      onAddToast('error', 'Please fill out all login fields.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
+      let emailToAuth = identifier.trim();
+      let matchedFullName = '';
+      let matchedPhone = '';
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Login failed');
+      if (loginMethod === 'phone') {
+        const phoneClean = identifier.trim();
+        // Look up registered email by phone number in Firestore
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('phoneNumber', '==', phoneClean));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+          throw new Error('No registered account found with this phone number.');
+        }
+
+        const userData = querySnapshot.docs[0].data();
+        emailToAuth = userData.email;
+        matchedFullName = userData.fullName;
+        matchedPhone = userData.phoneNumber;
+      } else {
+        emailToAuth = identifier.trim().toLowerCase();
       }
 
-      onAddToast('success', `Welcome back, ${data.user.fullName}! Citizen session successfully created.`);
-      onLoginSuccess(data.user, data.token);
+      // 1. Authenticate with Firebase Auth SDK using email and password
+      const userCredential = await signInWithEmailAndPassword(auth, emailToAuth, password);
+      const user = userCredential.user;
+
+      // 2. Fetch full user details from Firestore if they logged in directly via email
+      if (loginMethod === 'email') {
+        try {
+          const userDocRef = doc(db, 'users', user.uid);
+          const docSnap = await getDoc(userDocRef);
+          if (docSnap.exists()) {
+            const userData = docSnap.data();
+            matchedFullName = userData.fullName;
+            matchedPhone = userData.phoneNumber;
+          }
+        } catch (dbErr) {
+          console.warn("Could not query user doc details, utilizing fallback profile parameters:", dbErr);
+        }
+      }
+
+      const activeUser: User = {
+        id: user.uid,
+        email: user.email || emailToAuth,
+        fullName: matchedFullName || user.displayName || 'Authorized Citizen',
+        phoneNumber: matchedPhone
+      };
+
+      onAddToast('success', `Welcome back, ${activeUser.fullName}! Citizen session successfully created.`);
+      onLoginSuccess(activeUser, `firebase_token_${user.uid}`);
       setPage('home');
     } catch (err: any) {
       console.error(err);
-      onAddToast('error', err.message || 'Verification failed. Double check your email/password.');
+      let errMsg = err.message || 'Verification failed. Double check your credentials.';
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        errMsg = 'Invalid credentials or incorrect password. Please try again.';
+      } else if (err.code === 'auth/invalid-email') {
+        errMsg = 'Please enter a valid email address.';
+      }
+      onAddToast('error', errMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -60,13 +104,40 @@ export default function Login({ setPage, onLoginSuccess, onAddToast }: LoginProp
     try {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
+      
+      let matchedPhone = '';
+      let matchedFullName = user.displayName || 'Authorized Citizen';
+      
+      // Attempt to find existing user record to fetch their phone number
+      try {
+        const docRef = doc(db, 'users', user.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          matchedPhone = data.phoneNumber || '';
+          matchedFullName = data.fullName || matchedFullName;
+        } else {
+          // Create user record for Google login if it doesn't exist
+          const profile = {
+            id: user.uid,
+            email: user.email || '',
+            fullName: matchedFullName,
+            phoneNumber: '',
+            createdAt: new Date().toISOString()
+          };
+          await setDoc(docRef, profile);
+        }
+      } catch (e) {
+        console.warn("Firestore profile fetch bypassed:", e);
+      }
+
       const citizen_user: User = {
         id: user.uid,
         email: user.email || '',
-        fullName: user.displayName || 'Authorized Citizen'
+        fullName: matchedFullName,
+        phoneNumber: matchedPhone
       };
       
-      // Call mock or automated integration storage token setter
       onLoginSuccess(citizen_user, `firebase_token_${user.uid}`);
       onAddToast('success', `Welcome, ${citizen_user.fullName}! Successfully authenticated via Firebase Google Account.`);
       setPage('home');
@@ -128,24 +199,60 @@ export default function Login({ setPage, onLoginSuccess, onAddToast }: LoginProp
               Access the secure dashboard using your credentials.
             </p>
 
+            {/* Login Selection Options: Email or Mobile Number */}
+            <div className="flex bg-gray-100 p-1.5 rounded-xl mb-6 border border-gray-200">
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMethod('email');
+                  setIdentifier('');
+                }}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  loginMethod === 'email'
+                    ? 'bg-white text-gov-navy shadow-sm border border-gray-200'
+                    : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                <Mail className="w-3.5 h-3.5" />
+                Sign In via Email
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMethod('phone');
+                  setIdentifier('');
+                }}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  loginMethod === 'phone'
+                    ? 'bg-white text-gov-navy shadow-sm border border-gray-200'
+                    : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                <Phone className="w-3.5 h-3.5" />
+                Sign In via Mobile Number
+              </button>
+            </div>
+
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-gov-navy uppercase mb-1.5">
-                  Email Address or Phone Number
+                  {loginMethod === 'email' ? 'Email Address' : 'Mobile Number'}
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-3 text-gray-400 flex items-center gap-1">
-                    <Mail className="w-3.5 h-3.5" />
-                    <span className="text-gray-300">/</span>
-                    <Phone className="w-3.5 h-3.5" />
+                  <span className="absolute left-3 top-3 text-gray-400">
+                    {loginMethod === 'email' ? (
+                      <Mail className="w-4 h-4" />
+                    ) : (
+                      <Phone className="w-4 h-4" />
+                    )}
                   </span>
                   <input
-                    type="text"
+                    type={loginMethod === 'email' ? 'email' : 'tel'}
                     required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. citizen@email.com or +91 98765 43210"
-                    className="w-full text-xs pl-16 pr-4 py-3 clay-input bg-white text-gray-800 focus:outline-none"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder={loginMethod === 'email' ? 'e.g. citizen@email.com' : 'e.g. +91 98765 43210'}
+                    className="w-full text-xs pl-10 pr-4 py-3 clay-input bg-white text-gray-800 focus:outline-none"
                   />
                 </div>
               </div>
@@ -163,7 +270,7 @@ export default function Login({ setPage, onLoginSuccess, onAddToast }: LoginProp
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your system passcode"
+                    placeholder="Enter your security passcode"
                     className="w-full text-xs pl-10 pr-10 py-3 clay-input bg-white text-gray-800 focus:outline-none"
                   />
                   <button

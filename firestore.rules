@@ -19,11 +19,12 @@ service cloud.firestore {
     // Zero-Trust ABAC validation helper for Citizen History document insertions
     function isValidHistoryItem(data) {
       return data.keys().hasAll(['title', 'category', 'simplifiedEnglish', 'createdAt', 'userEmail'])
-        && data.keys().size() <= 10
+        && data.keys().size() <= 11
         && data.title is string && data.title.size() <= 500
         && data.category is string && data.category.size() <= 150
         && data.simplifiedEnglish is string && data.simplifiedEnglish.size() <= 100000
-        && data.userEmail is string && data.userEmail == request.auth.token.email;
+        && data.userEmail is string && data.userEmail == request.auth.token.email
+        && data.get('userId', request.auth.uid) == request.auth.uid;
     }
 
     // Citizen history entries collection configuration
@@ -31,12 +32,25 @@ service cloud.firestore {
       allow create: if isSignedIn() 
         && isValidId(historyId)
         && isValidHistoryItem(request.resource.data)
-        && request.resource.data.createdAt == request.time;
+        && (request.resource.data.createdAt == request.time || request.resource.data.createdAt is string);
       
       allow read, delete: if isSignedIn()
-        && resource.data.userEmail == request.auth.token.email;
+        && (resource.data.get('userEmail', '') == request.auth.token.email
+            || resource.data.get('userId', '') == request.auth.uid);
         
       allow update: if false; // Documents are immutable for auditing and tamper protection
+    }
+
+    // Citizen Profiles
+    match /users/{userId} {
+      allow read, create: if true;
+      allow update, delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Shares Snapshots
+    match /shares/{shareId} {
+      allow read, create: if true;
+      allow update, delete: if false;
     }
   }
 }

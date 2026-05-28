@@ -6,6 +6,9 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Lock, Mail, Landmark, User, ShieldCheck, CheckSquare, Phone } from 'lucide-react';
 import { User as UserType } from '../types';
+import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { doc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { auth, db } from "../firebase";
 
 interface RegisterProps {
   setPage: (page: string) => void;
@@ -24,7 +27,10 @@ export default function Register({ setPage, onRegisterSuccess, onAddToast }: Reg
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName || !email || !password || !phoneNumber) {
+    const cleanPhone = phoneNumber.trim();
+    const cleanEmail = email.toLowerCase().trim();
+
+    if (!fullName || !cleanEmail || !password || !cleanPhone) {
       onAddToast('error', 'Please fill out all registration fields.');
       return;
     }
@@ -36,25 +42,44 @@ export default function Register({ setPage, onRegisterSuccess, onAddToast }: Reg
 
     setIsSubmitting(true);
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password, fullName, phoneNumber }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Registration failed');
+      // 1. Check if the phone number already exists in Firestore
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('phoneNumber', '==', cleanPhone));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        throw new Error('An account with this phone number already exists.');
       }
 
-      onAddToast('success', 'Your Citizen Account has been successfully established!');
-      onRegisterSuccess(data.user, data.token);
+      // 2. Create the user within Firebase Auth
+      const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+      const user = userCredential.user;
+
+      // 3. Update the user displayName in Firebase Auth profile
+      await updateProfile(user, { displayName: fullName });
+
+      // 4. Save extra citizen parameters to Firestore under the unique UUID
+      const profile: UserType = {
+        id: user.uid,
+        email: cleanEmail,
+        fullName,
+        phoneNumber: cleanPhone
+      };
+      await setDoc(doc(db, 'users', user.uid), profile);
+
+      onAddToast('success', 'Your Citizen Account has been successfully established and synchronized!');
+      onRegisterSuccess(profile, `firebase_token_${user.uid}`);
       setPage('home');
     } catch (err: any) {
       console.error(err);
-      onAddToast('error', err.message || 'Registration failed. Try a different email address.');
+      let errMsg = err.message || 'Registration failed.';
+      if (err.code === 'auth/email-already-in-use') {
+        errMsg = 'An account with this email address already exists in our system.';
+      } else if (err.code === 'auth/weak-password') {
+        errMsg = 'The password is too weak. Please use at least 6 characters.';
+      } else if (err.code === 'auth/invalid-email') {
+        errMsg = 'Please enter a valid email address.';
+      }
+      onAddToast('error', errMsg);
     } finally {
       setIsSubmitting(false);
     }
