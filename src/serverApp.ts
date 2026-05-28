@@ -99,16 +99,23 @@ app.get('/api/health', (req, res) => {
 
 // 1. Authentication Endpoints
 app.post('/api/auth/register', (req, res) => {
-  const { email, password, fullName } = req.body;
-  if (!email || !password || !fullName) {
-    res.status(400).json({ error: 'Missing required registration fields' });
+  const { email, password, fullName, phoneNumber } = req.body;
+  if (!email || !password || !fullName || !phoneNumber) {
+    res.status(400).json({ error: 'Missing required registration fields (including Phone Number)' });
     return;
   }
 
   const db = readDB();
-  const existing = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
-  if (existing) {
+  const existingEmail = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
+  if (existingEmail) {
     res.status(400).json({ error: 'An account with this email already exists' });
+    return;
+  }
+
+  const cleanPhone = phoneNumber.trim();
+  const existingPhone = db.users.find((u: any) => u.phoneNumber && u.phoneNumber === cleanPhone);
+  if (existingPhone) {
+    res.status(400).json({ error: 'An account with this phone number already exists' });
     return;
   }
 
@@ -118,6 +125,7 @@ app.post('/api/auth/register', (req, res) => {
     email: email.toLowerCase(),
     password, 
     fullName,
+    phoneNumber: cleanPhone,
     token,
     createdAt: new Date().toISOString(),
   };
@@ -126,7 +134,7 @@ app.post('/api/auth/register', (req, res) => {
   writeDB(db);
 
   res.json({
-    user: { id: newUser.id, email: newUser.email, fullName: newUser.fullName },
+    user: { id: newUser.id, email: newUser.email, fullName: newUser.fullName, phoneNumber: newUser.phoneNumber },
     token,
   });
 });
@@ -134,14 +142,20 @@ app.post('/api/auth/register', (req, res) => {
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
-    res.status(400).json({ error: 'Missing email or password' });
+    res.status(400).json({ error: 'Missing login credentials or password' });
     return;
   }
 
   const db = readDB();
-  const user = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+  const identifier = email.toLowerCase().trim();
+  const user = db.users.find((u: any) => {
+    const userEmail = u.email ? u.email.toLowerCase().trim() : '';
+    const userPhone = u.phoneNumber ? u.phoneNumber.toLowerCase().trim() : '';
+    return (userEmail === identifier || userPhone === identifier) && u.password === password;
+  });
+
   if (!user) {
-    res.status(401).json({ error: 'Invalid email or password' });
+    res.status(401).json({ error: 'Invalid Email/Phone Number or password' });
     return;
   }
 
@@ -151,14 +165,14 @@ app.post('/api/auth/login', (req, res) => {
   writeDB(db);
 
   res.json({
-    user: { id: user.id, email: user.email, fullName: user.fullName },
+    user: { id: user.id, email: user.email, fullName: user.fullName, phoneNumber: user.phoneNumber },
     token,
   });
 });
 
 app.get('/api/auth/me', requireAuth, (req: any, res) => {
   res.json({
-    user: { id: req.user.id, email: req.user.email, fullName: req.user.fullName },
+    user: { id: req.user.id, email: req.user.email, fullName: req.user.fullName, phoneNumber: req.user.phoneNumber },
   });
 });
 

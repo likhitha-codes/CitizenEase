@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Eye, EyeOff, Lock, Mail, Landmark, User, ShieldCheck, CheckSquare } from 'lucide-react';
+import { Eye, EyeOff, Lock, Mail, Landmark, User, ShieldCheck, CheckSquare, Phone } from 'lucide-react';
 import { User as UserType } from '../types';
 
 interface RegisterProps {
@@ -16,6 +16,7 @@ interface RegisterProps {
 export default function Register({ setPage, onRegisterSuccess, onAddToast }: RegisterProps) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
@@ -23,7 +24,7 @@ export default function Register({ setPage, onRegisterSuccess, onAddToast }: Reg
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName || !email || !password) {
+    if (!fullName || !email || !password || !phoneNumber) {
       onAddToast('error', 'Please fill out all registration fields.');
       return;
     }
@@ -40,7 +41,7 @@ export default function Register({ setPage, onRegisterSuccess, onAddToast }: Reg
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password, fullName }),
+        body: JSON.stringify({ email, password, fullName, phoneNumber }),
       });
 
       const data = await res.json();
@@ -143,6 +144,25 @@ export default function Register({ setPage, onRegisterSuccess, onAddToast }: Reg
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="e.g. citizen@email.com"
+                    className="w-full text-xs pl-10 pr-4 py-3 clay-input bg-white text-gray-800 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gov-navy uppercase mb-1.5">
+                  Phone Number
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-3 text-gray-400">
+                    <Phone className="w-4 h-4" />
+                  </span>
+                  <input
+                    type="tel"
+                    required
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="e.g. +91 98765 43210"
                     className="w-full text-xs pl-10 pr-4 py-3 clay-input bg-white text-gray-800 focus:outline-none"
                   />
                 </div>

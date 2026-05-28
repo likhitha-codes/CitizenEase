@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Eye, EyeOff, Lock, Mail, Landmark, ShieldCheck, HelpCircle } from 'lucide-react';
+import { Eye, EyeOff, Lock, Mail, Landmark, ShieldCheck, HelpCircle, Phone } from 'lucide-react';
 import { User } from '../types';
 import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { auth } from "../firebase";
@@ -131,19 +131,21 @@ export default function Login({ setPage, onLoginSuccess, onAddToast }: LoginProp
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-gov-navy uppercase mb-1.5">
-                  Email Address
+                  Email Address or Phone Number
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-3 text-gray-400">
-                    <Mail className="w-4 h-4" />
+                  <span className="absolute left-3 top-3 text-gray-400 flex items-center gap-1">
+                    <Mail className="w-3.5 h-3.5" />
+                    <span className="text-gray-300">/</span>
+                    <Phone className="w-3.5 h-3.5" />
                   </span>
                   <input
-                    type="email"
+                    type="text"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. citizen@email.com"
-                    className="w-full text-xs pl-10 pr-4 py-3 clay-input bg-white text-gray-800 focus:outline-none"
+                    placeholder="e.g. citizen@email.com or +91 98765 43210"
+                    className="w-full text-xs pl-16 pr-4 py-3 clay-input bg-white text-gray-800 focus:outline-none"
                   />
                 </div>
               </div>
